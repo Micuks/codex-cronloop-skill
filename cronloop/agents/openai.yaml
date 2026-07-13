@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cron Loop"
+  short_description: "Schedule safe recurring Codex thread checks"
+  default_prompt: "Use $cronloop to run a scoped health check every hour until its completion condition is verified."

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" role="img" aria-labelledby="title desc">
+  <title id="title">Cronloop terminal demonstration</title>
+  <desc id="desc">Illustrative terminal output for installing and checking a 30-minute benchmark monitoring job.</desc>
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17253e"/>
+      <stop offset="1" stop-color="#0b1425"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#020610" flood-opacity=".55"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="670" rx="28" fill="#07111f"/>
+  <g filter="url(#shadow)">
+    <rect x="55" y="46" width="1090" height="578" rx="18" fill="url(#frame)" stroke="#31445f"/>
+    <path d="M55 102h1090" stroke="#31445f"/>
+    <circle cx="88" cy="74" r="8" fill="#ff6b6b"/>
+    <circle cx="116" cy="74" r="8" fill="#f7c96b"/>
+    <circle cx="144" cy="74" r="8" fill="#65d7c1"/>
+    <text x="600" y="80" text-anchor="middle" fill="#8093af" font-family="Inter,Segoe UI,sans-serif" font-size="14">cronloop — representative output</text>
+  </g>
+  <g font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="17">
+    <text x="84" y="143" fill="#65d7c1">$</text>
+    <text x="108" y="143" fill="#edf3ff">$cronloop 30m monitor ./runs/exp-42 until 3 valid rounds complete</text>
+
+    <text x="84" y="186" fill="#8093af">expanded contract</text>
+    <text x="260" y="186" fill="#a9b9d0">scope · health checks · safe recovery · reporting · stop condition</text>
+
+    <text x="84" y="230" fill="#67a6ff">✓</text>
+    <text x="114" y="230" fill="#edf3ff">installed</text>
+    <text x="238" y="230" fill="#a9b9d0">benchmark-watch</text>
+    <text x="472" y="230" fill="#8093af">schedule</text>
+    <text x="570" y="230" fill="#f7c96b">*/30 * * * *</text>
+
+    <text x="84" y="266" fill="#67a6ff">✓</text>
+    <text x="114" y="266" fill="#edf3ff">exact thread</text>
+    <text x="270" y="266" fill="#a9b9d0">12345678-…-123456789abc</text>
+
+    <text x="84" y="302" fill="#67a6ff">✓</text>
+    <text x="114" y="302" fill="#edf3ff">cron daemon</text>
+    <text x="270" y="302" fill="#65d7c1">active:cron</text>
+    <text x="472" y="302" fill="#8093af">marker</text>
+    <text x="548" y="302" fill="#65d7c1">present</text>
+
+    <text x="84" y="359" fill="#65d7c1">$</text>
+    <text x="108" y="359" fill="#edf3ff">cronloop status --job-id benchmark-watch</text>
+
+    <rect x="82" y="387" width="1036" height="178" rx="10" fill="#091322" stroke="#243957"/>
+    <text x="108" y="423" fill="#8093af">matrix</text>
+    <text x="238" y="423" fill="#edf3ff">248/360 valid</text>
+    <text x="484" y="423" fill="#8093af">runner</text>
+    <text x="604" y="423" fill="#65d7c1">healthy · one instance</text>
+    <text x="108" y="461" fill="#8093af">latest</text>
+    <text x="238" y="461" fill="#edf3ff">progress 4m ago</text>
+    <text x="484" y="461" fill="#8093af">action</text>
+    <text x="604" y="461" fill="#edf3ff">none</text>
+    <text x="108" y="499" fill="#8093af">ETA</text>
+    <text x="238" y="499" fill="#f7c96b">~4h10m</text>
+    <text x="484" y="499" fill="#8093af">next wake-up</text>
+    <text x="644" y="499" fill="#edf3ff">only if incomplete</text>
+    <text x="108" y="537" fill="#8093af">completion</text>
+    <text x="238" y="537" fill="#67a6ff">verify artifact → report → self-remove marker block</text>
+
+    <text x="84" y="599" fill="#7187a8">No model process remains alive between scheduled checks.</text>
+  </g>
+</svg>
