@@ -1,6 +1,6 @@
 # Cronloop for Codex CLI
 
-[简体中文](README.zh-CN.md) · [Example](examples/benchmark-monitoring.md) · [MIT License](LICENSE)
+[简体中文](README.zh-CN.md) · [Example](examples/benchmark-monitoring.md) · [Changelog](CHANGELOG.md) · [MIT License](LICENSE)
 
 Cronloop turns a short request such as “check this experiment every 30 minutes” into a guarded, recurring resume of the **exact current Codex CLI thread**. Each wake-up runs one evidence-driven round, records status and logs, and removes only its own cron entry after the completion condition is verified.
 
@@ -15,6 +15,7 @@ Long experiments often outlive one interactive Codex turn. A plain cron command 
 - duplicate-run protection with file locking and a recent-activity window;
 - explicit scope, checks, recovery authority, reporting, and completion criteria;
 - timeout shorter than the interval and optional completion-file fast path;
+- optional Feishu delivery of each executed round's final assistant response;
 - marker-scoped, idempotent crontab updates that preserve unrelated entries;
 - local audit trail with permission-restricted prompt, config, status, and logs.
 
@@ -26,6 +27,7 @@ Cronloop is a local fallback. Prefer a product-native scheduled-task feature whe
 - Python 3.9+
 - An authenticated `codex` CLI
 - A locally resumable Codex thread with `CODEX_THREAD_ID` available
+- Optional notifications: an authenticated [`lark-cli`](https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide.md) with both user and bot identities ready
 
 The runner has no third-party Python dependencies.
 
@@ -61,6 +63,22 @@ python3 ~/.codex/skills/cronloop/scripts/cronloop.py status --job-id benchmark-w
 python3 ~/.codex/skills/cronloop/scripts/cronloop.py remove --job-id benchmark-watch
 ```
 
+### Optional Feishu notifications
+
+Add `--notify feishu-cli` when installing a job to receive every executed round's final Codex response as a Feishu direct message:
+
+```bash
+python3 ~/.codex/skills/cronloop/scripts/cronloop.py install \
+  --interval 30m \
+  --thread-id "$CODEX_THREAD_ID" \
+  --workdir "$PWD" \
+  --prompt-file /path/to/expanded-prompt.txt \
+  --job-id benchmark-watch \
+  --notify feishu-cli
+```
+
+The default target is the currently authenticated Feishu user. Use `--notify-target ou_xxx` for another user or `--notify-target oc_xxx` for a group chat. Cronloop verifies `lark-cli whoami` during installation, captures the round with Codex's `--output-last-message`, and sends it as the authenticated bot. Skipped rounds do not notify. Delivery is fail-open: a Feishu error is recorded in the job's `notify.log` and status file without turning a successful monitoring round into a failure. A completion-file fast path emits a minimal completion notice.
+
 Supported intervals are `30m`, hour divisors of 24 (`1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`), and `1d`. Intervals below 30 minutes are intentionally rejected.
 
 ## Effect example
@@ -83,6 +101,8 @@ This pattern keeps the agent in the loop without keeping a model process alive b
 | Runaway invocation | Per-run timeout is shorter than the schedule interval |
 | Prompt leaks credentials | Secret-like assignments are rejected; stored files use mode `0600` |
 | Proxy leaks credentials | Credential-bearing proxy URLs are not persisted |
+| Notification leaks credentials | Secret-like fields and webhook URLs are redacted before delivery |
+| Notification outage breaks monitoring | Delivery failures are isolated and recorded in `notify.log` |
 | Existing crontab is damaged | Only a named `BEGIN/END CRONLOOP` block is replaced or removed |
 | Recovery exceeds authority | Expanded prompt must state scope, allowed recovery, and forbidden actions |
 | Loop survives completion | Verified completion triggers its per-job removal command |
@@ -98,7 +118,7 @@ cronloop/                 installable Codex skill
   scripts/cronloop.py
 docs/images/              versioned diagrams used by both READMEs
 examples/                 expanded prompt and representative artifacts
-tests/                    isolated tests with fake crontab and fake Codex binary
+tests/                    isolated tests with fake crontab, Codex, and Lark binaries
 ```
 
 ## Development
@@ -108,7 +128,7 @@ python3 -m unittest discover -s tests -v
 python3 cronloop/scripts/cronloop.py --help
 ```
 
-Tests use temporary files and never install a real crontab entry or resume a real thread.
+Tests use temporary files and never install a real crontab entry, resume a real thread, or send a real Feishu message.
 
 ## License
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -161,6 +162,188 @@ class CronloopCliTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("appears to contain a secret", result.stderr)
+
+
+class CronloopModelPinTest(unittest.TestCase):
+    def test_fake_resume_receives_pinned_model(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            sessions = codex_home / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / f"rollout-{THREAD_ID}.jsonl").write_text("{}\n")
+
+            prompt = root / "prompt.txt"
+            prompt.write_text(
+                "Inspect fake state. Run exactly one round; do not sleep or schedule.\n"
+            )
+            crontab = root / "crontab"
+            crontab.write_text("MAILTO=test@example.invalid\n")
+            argv_log = root / "argv.txt"
+            fake_codex = root / "fake-codex"
+            fake_codex.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"$@\" > {shlex.quote(str(argv_log))}\n"
+                "cat >/dev/null\n"
+            )
+            fake_codex.chmod(0o755)
+            state_root = root / "state"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "install",
+                    "--interval",
+                    "30m",
+                    "--thread-id",
+                    THREAD_ID,
+                    "--workdir",
+                    str(root),
+                    "--prompt-file",
+                    str(prompt),
+                    "--job-id",
+                    "fake-luna-monitor",
+                    "--model",
+                    "gpt-5.6-luna",
+                    "--active-window",
+                    "0",
+                    "--codex-home",
+                    str(codex_home),
+                    "--codex-bin",
+                    str(fake_codex),
+                    "--state-root",
+                    str(state_root),
+                    "--crontab-file",
+                    str(crontab),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "run",
+                    "--job-id",
+                    "fake-luna-monitor",
+                    "--state-root",
+                    str(state_root),
+                    "--crontab-file",
+                    str(crontab),
+                ],
+                check=True,
+            )
+            self.assertEqual(
+                argv_log.read_text().splitlines(),
+                ["exec", "resume", "--model", "gpt-5.6-luna", THREAD_ID, "-"],
+            )
+
+
+class CronloopFeishuNotifyTest(unittest.TestCase):
+    def test_completed_round_sends_last_message_with_fake_lark_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            sessions = codex_home / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / f"rollout-{THREAD_ID}.jsonl").write_text("{}\n")
+            prompt = root / "prompt.txt"
+            prompt.write_text("Inspect fake state once, report, then return.\n")
+            crontab = root / "crontab"
+            crontab.write_text("")
+
+            fake_codex = root / "fake-codex"
+            fake_codex.write_text(
+                "#!/bin/sh\n"
+                "out=\n"
+                "while [ $# -gt 0 ]; do\n"
+                "  if [ \"$1\" = --output-last-message ]; then shift; out=$1; fi\n"
+                "  shift\n"
+                "done\n"
+                "cat >/dev/null\n"
+                "test -z \"$out\" || printf 'fake round is healthy\\n' > \"$out\"\n"
+            )
+            fake_codex.chmod(0o755)
+
+            lark_argv = root / "lark-argv.txt"
+            fake_lark = root / "lark-cli"
+            fake_lark.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = whoami ]; then\n"
+                "  printf '%s\\n' '{\"identity\":\"bot\",\"available\":true,\"tokenStatus\":\"ready\"}'\n"
+                "  exit 0\n"
+                "fi\n"
+                f"printf '%s\\n' \"$@\" > {shlex.quote(str(lark_argv))}\n"
+                "printf '%s\\n' '{\"ok\":true,\"data\":{\"message_id\":\"om_test\"}}'\n"
+            )
+            fake_lark.chmod(0o755)
+            state_root = root / "state"
+
+            installed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "install",
+                    "--interval",
+                    "30m",
+                    "--thread-id",
+                    THREAD_ID,
+                    "--workdir",
+                    str(root),
+                    "--prompt-file",
+                    str(prompt),
+                    "--job-id",
+                    "fake-feishu-monitor",
+                    "--active-window",
+                    "0",
+                    "--codex-home",
+                    str(codex_home),
+                    "--codex-bin",
+                    str(fake_codex),
+                    "--notify",
+                    "feishu-cli",
+                    "--notify-target",
+                    "ou_testuser",
+                    "--notify-cli",
+                    str(fake_lark),
+                    "--state-root",
+                    str(state_root),
+                    "--crontab-file",
+                    str(crontab),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(json.loads(installed.stdout)["notify"]["target"], "ou_testuser")
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "run",
+                    "--job-id",
+                    "fake-feishu-monitor",
+                    "--state-root",
+                    str(state_root),
+                    "--crontab-file",
+                    str(crontab),
+                ],
+                check=True,
+            )
+
+            sent = lark_argv.read_text().splitlines()
+            self.assertEqual(
+                sent[:6],
+                ["im", "+messages-send", "--as", "bot", "--user-id", "ou_testuser"],
+            )
+            self.assertIn("fake round is healthy", lark_argv.read_text())
+            status = json.loads(
+                (state_root / "jobs" / "fake-feishu-monitor" / "status.json").read_text()
+            )
+            self.assertEqual(status["last_notify_state"], "sent")
+            self.assertEqual(status["last_notify_message_id"], "om_test")
 
 
 if __name__ == "__main__":

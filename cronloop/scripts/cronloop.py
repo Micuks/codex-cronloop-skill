@@ -27,7 +27,10 @@ DEFAULT_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 STATE_ROOT = DEFAULT_HOME / "cronloop"
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 JOB_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+NOTIFY_TARGET_RE = re.compile(r"^(?:ou|oc)_[A-Za-z0-9]+$")
 PROXY_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
+MAX_NOTIFICATION_CHARS = 12_000
 
 
 def fail(message: str) -> "None":
@@ -100,6 +103,47 @@ def cron_daemon_status() -> str:
 def validate_timeout(value: int, interval_seconds: int) -> None:
     if value <= 0 or value >= interval_seconds:
         fail("timeout must be positive and shorter than the interval")
+
+
+def command_json(command: list[str], *, env: dict[str, str] | None = None) -> dict:
+    proc = subprocess.run(command, text=True, capture_output=True, env=env)
+    if proc.returncode:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+        fail(f"command failed: {detail}")
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        fail(f"command returned invalid JSON: {exc}")
+
+
+def prepare_notification(args: argparse.Namespace) -> dict | None:
+    if not args.notify:
+        if args.notify_target:
+            fail("--notify-target requires --notify")
+        return None
+    cli = Path(args.notify_cli or shutil.which("lark-cli") or "")
+    if not cli.is_file():
+        fail("cannot locate lark-cli; install it or pass --notify-cli")
+    cli = cli.resolve()
+    env = os.environ.copy()
+    env["LARK_CLI_NO_PROXY_WARN"] = "1"
+    bot = command_json([str(cli), "whoami", "--as", "bot"], env=env)
+    if not bot.get("available") or bot.get("tokenStatus") not in {"ready", "valid"}:
+        fail("lark-cli bot identity is not ready; run lark-cli config init/auth login first")
+    target = args.notify_target or "me"
+    if target == "me":
+        user = command_json([str(cli), "whoami", "--as", "user"], env=env)
+        target = ((user.get("onBehalfOf") or {}).get("openId") or "").strip()
+        if not user.get("available") or not NOTIFY_TARGET_RE.fullmatch(target):
+            fail("cannot resolve the authenticated Feishu user for --notify-target me")
+    if not NOTIFY_TARGET_RE.fullmatch(target):
+        fail("--notify-target must be me, an ou_ user open_id, or an oc_ chat_id")
+    return {
+        "mode": args.notify,
+        "cli": str(cli),
+        "target_type": "chat_id" if target.startswith("oc_") else "user_id",
+        "target": target,
+    }
 
 
 def state_dir(root: Path, job_id: str) -> Path:
@@ -204,6 +248,9 @@ def install(args: argparse.Namespace) -> None:
         fail("active window must be nonnegative and shorter than the interval")
     if args.completion_file and not Path(args.completion_file).is_absolute():
         fail("completion file must be an absolute path")
+    if args.model and not MODEL_RE.fullmatch(args.model):
+        fail("model must be a plain model id without whitespace or shell characters")
+    notification = prepare_notification(args)
 
     job_id = args.job_id or f"job-{dt.datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}"
     if not JOB_RE.fullmatch(job_id):
@@ -238,7 +285,7 @@ def install(args: argparse.Namespace) -> None:
     if existing_config_path.exists():
         existing_created_at = read_json(existing_config_path).get("created_at")
     config = {
-        "version": 1,
+        "version": 3,
         "job_id": job_id,
         "enabled": True,
         "created_at": existing_created_at or dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -251,11 +298,13 @@ def install(args: argparse.Namespace) -> None:
         "workdir": str(workdir),
         "codex_home": str(codex_home),
         "codex_bin": str(codex_bin.resolve()),
+        "model": args.model,
         "home": str(Path.home()),
         "path": f"{Path.home() / '.local/bin'}:/usr/local/bin:/usr/bin:/bin",
         "active_window_seconds": args.active_window,
         "timeout_seconds": timeout_seconds,
         "completion_file": args.completion_file,
+        "notify": notification,
         "proxy_env": proxies,
         "prompt_sha256": hashlib.sha256(stored_prompt.encode()).hexdigest(),
     }
@@ -286,7 +335,7 @@ def install(args: argparse.Namespace) -> None:
         if current and not current.endswith("\n"):
             current += "\n"
         save_crontab(args, current + block)
-    result = {"job_id": job_id, "interval": normalized, "schedule": schedule, "timeout_seconds": timeout_seconds, "state_dir": str(job_dir), "cron_daemon": cron_daemon_status(), "skipped_credentialed_proxy_keys": skipped}
+    result = {"job_id": job_id, "interval": normalized, "schedule": schedule, "timeout_seconds": timeout_seconds, "notify": notification, "state_dir": str(job_dir), "cron_daemon": cron_daemon_status(), "skipped_credentialed_proxy_keys": skipped}
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -313,7 +362,7 @@ def list_jobs(args: argparse.Namespace) -> None:
     jobs = []
     for config_path in sorted((root / "jobs").glob("*/config.json")):
         config = read_json(config_path)
-        jobs.append({k: config.get(k) for k in ("job_id", "enabled", "interval", "schedule", "thread_id", "workdir", "updated_at", "removed_at")})
+        jobs.append({k: config.get(k) for k in ("job_id", "enabled", "interval", "schedule", "thread_id", "model", "notify", "workdir", "updated_at", "removed_at")})
     print(json.dumps(jobs, ensure_ascii=False, indent=2))
 
 
@@ -335,6 +384,78 @@ def update_status(job_dir: Path, **fields: object) -> None:
     write_json(status_path, current)
 
 
+def redact_notification(text: str) -> str:
+    text = re.sub(
+        r"(?i)\b(password|passwd|token|secret|private[_ -]?key|authorization)\s*[:=]\s*\S+",
+        lambda match: f"{match.group(1)}=***",
+        text,
+    )
+    text = re.sub(r"https://open\.feishu\.cn/open-apis/bot/v2/hook/\S+", "[redacted webhook]", text)
+    if len(text) > MAX_NOTIFICATION_CHARS:
+        text = text[: MAX_NOTIFICATION_CHARS - 40].rstrip() + "\n\n[notification truncated]"
+    return text
+
+
+def send_notification(
+    config: dict,
+    job_dir: Path,
+    *,
+    state: str,
+    rc: int,
+    message: str | None,
+    event_id: str,
+) -> None:
+    notify = config.get("notify")
+    if not notify:
+        return
+    finished = dt.datetime.now(dt.timezone.utc).isoformat()
+    detail = message.strip() if message and message.strip() else "No final assistant message was produced; inspect codex.log."
+    body = redact_notification(
+        f"## Cronloop · {config['job_id']}\n\n"
+        f"- state: `{state}`\n"
+        f"- rc: `{rc}`\n"
+        f"- time: `{finished}`\n\n"
+        f"{detail}"
+    )
+    target_flag = "--chat-id" if notify["target_type"] == "chat_id" else "--user-id"
+    idempotency = "cl-" + hashlib.sha256(f"{config['job_id']}:{event_id}".encode()).hexdigest()[:24]
+    command = [
+        notify["cli"],
+        "im",
+        "+messages-send",
+        "--as",
+        "bot",
+        target_flag,
+        notify["target"],
+        "--markdown",
+        body,
+        "--idempotency-key",
+        idempotency,
+        "--format",
+        "json",
+    ]
+    env = {"HOME": config["home"], "PATH": config["path"], "LARK_CLI_NO_PROXY_WARN": "1"}
+    env.update(config.get("proxy_env", {}))
+    notify_log = job_dir / "notify.log"
+    try:
+        proc = subprocess.run(command, text=True, capture_output=True, env=env, timeout=30)
+        payload = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        if proc.returncode or not payload.get("ok"):
+            detail = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+            raise RuntimeError(detail)
+        message_id = ((payload.get("data") or {}).get("message_id"))
+        with notify_log.open("a") as log:
+            log.write(f"[{finished}] sent state={state} rc={rc} message_id={message_id or '-'}\n")
+        os.chmod(notify_log, 0o600)
+        update_status(job_dir, last_notify_at=finished, last_notify_state="sent", last_notify_message_id=message_id)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
+        error = str(exc).replace("\n", " ")[:1000]
+        with notify_log.open("a") as log:
+            log.write(f"[{finished}] warning state={state} rc={rc} error={error}\n")
+        os.chmod(notify_log, 0o600)
+        update_status(job_dir, last_notify_at=finished, last_notify_state="failed", last_notify_error=error)
+
+
 def run(args: argparse.Namespace) -> None:
     root = Path(args.state_root).expanduser().resolve()
     job_dir = state_dir(root, args.job_id)
@@ -350,6 +471,15 @@ def run(args: argparse.Namespace) -> None:
         return
     completion = config.get("completion_file")
     if completion and Path(completion).exists():
+        event_id = dt.datetime.now(dt.timezone.utc).isoformat()
+        send_notification(
+            config,
+            job_dir,
+            state="complete",
+            rc=0,
+            message=f"Completion marker detected: {completion}",
+            event_id=event_id,
+        )
         remove(argparse.Namespace(job_id=args.job_id, state_root=str(root), purge=False, crontab_file=args.crontab_file), automatic=True)
         update_status(job_dir, last_skip_at=dt.datetime.now(dt.timezone.utc).isoformat(), last_skip_reason="completion-file-present")
         return
@@ -366,11 +496,21 @@ def run(args: argparse.Namespace) -> None:
     env.update(config.get("proxy_env", {}))
     started = dt.datetime.now(dt.timezone.utc).isoformat()
     update_status(job_dir, last_started_at=started, state="running")
+    last_message_path = job_dir / "last-message.txt"
+    if config.get("notify") and last_message_path.exists():
+        last_message_path.unlink()
     with (job_dir / "codex.log").open("a") as log:
         log.write(f"\n[{started}] cronloop invocation\n")
         log.flush()
+        command = [config["codex_bin"], "exec"]
+        if config.get("notify"):
+            command.extend(["--output-last-message", str(last_message_path)])
+        command.append("resume")
+        if config.get("model"):
+            command.extend(["--model", config["model"]])
+        command.extend([config["thread_id"], "-"])
         proc = subprocess.Popen(
-                [config["codex_bin"], "exec", "resume", config["thread_id"], "-"],
+                command,
                 text=True,
                 stdin=subprocess.PIPE,
                 stdout=log,
@@ -392,7 +532,13 @@ def run(args: argparse.Namespace) -> None:
                 proc.wait()
             rc = 124
             state = "timed-out"
-    update_status(job_dir, last_finished_at=dt.datetime.now(dt.timezone.utc).isoformat(), state=state, last_rc=rc)
+    finished = dt.datetime.now(dt.timezone.utc).isoformat()
+    update_status(job_dir, last_finished_at=finished, state=state, last_rc=rc)
+    last_message = None
+    if last_message_path.exists():
+        os.chmod(last_message_path, 0o600)
+        last_message = last_message_path.read_text(errors="replace")
+    send_notification(config, job_dir, state=state, rc=rc, message=last_message, event_id=started)
     if rc:
         raise SystemExit(rc)
 
@@ -416,6 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--completion-file")
     p.add_argument("--codex-home", default=str(DEFAULT_HOME))
     p.add_argument("--codex-bin")
+    p.add_argument("--model", help="model id to pin for every scheduled resume")
+    p.add_argument("--notify", choices=("feishu-cli",), help="send each completed round through the selected channel")
+    p.add_argument("--notify-target", help="me (default), an ou_ user open_id, or an oc_ chat_id")
+    p.add_argument("--notify-cli", help=argparse.SUPPRESS)
     common_state(p)
     p.set_defaults(func=install)
     for name, func in (("remove", remove), ("status", status)):

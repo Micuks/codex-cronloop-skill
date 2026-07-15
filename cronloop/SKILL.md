@@ -1,6 +1,6 @@
 ---
 name: cronloop
-description: Create, inspect, update, and remove safe recurring Codex CLI thread checks backed by cron. Use for requests such as `/cronloop 1h prompt`, `$cronloop`, periodic polling, health checks, experiment monitoring, or a bounded recurring task that should resume the current thread until a verified stop condition. Prefer a product-native Scheduled task when available; use this skill as the local CLI fallback.
+description: Create, inspect, update, and remove safe recurring Codex CLI thread checks backed by cron, with optional Feishu CLI notifications. Use for requests such as `/cronloop 1h prompt`, `$cronloop`, periodic polling, health checks, experiment monitoring, recurring notifications, or a bounded task that should resume the current thread until a verified stop condition. Prefer a product-native Scheduled task when available; use this skill as the local CLI fallback.
 ---
 
 # Cronloop
@@ -30,8 +30,20 @@ python3 <skill-dir>/scripts/cronloop.py install \
   --interval 1h \
   --thread-id "$CODEX_THREAD_ID" \
   --workdir "$PWD" \
+  --model gpt-5.6-luna \
   --prompt-file /path/to/expanded-prompt.txt
 ```
+
+To send each executed round to the currently authenticated Feishu user as a bot DM, add:
+
+```bash
+  --notify feishu-cli
+```
+
+Notification is opt-in and requires `lark-cli whoami --as user` and `--as bot` to report ready identities. The default target is `me`; use `--notify-target ou_xxx` for another user or `--notify-target oc_xxx` for a group chat. The installer resolves `me` once and stores only the non-secret target ID and absolute CLI path. Each real Codex round sends its final assistant message; nonzero or timed-out rounds send an explicit fallback when no final message exists. Notification failures are logged to `notify.log` and never fail or block the cron job. Lock-contention and thread-active skips do not notify. A `--completion-file` fast-path sends a minimal completion-marker notice before automatic removal.
+
+Omit `--model` to inherit the normal Codex CLI default. Use `--model` when the
+user explicitly requests a particular available model for scheduled resumes.
 
 Accepted exact cron intervals are `30m`, hour divisors of 24 (`1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`), and `1d`; equivalent `60m` and `24h` normalize. Reject intervals below 30 minutes or intervals cron cannot express with constant spacing. Explain that native Scheduled tasks are preferable when the product exposes them.
 
@@ -61,6 +73,7 @@ python3 <skill-dir>/scripts/cronloop.py remove --job-id <id>
 - Preserve every unrelated crontab line.
 - Use exact thread UUID, `flock`-equivalent locking, an inactivity window, and a timeout shorter than the interval.
 - Run under an explicit minimal `HOME` and `PATH`. Persist only proxy URLs without embedded credentials.
+- Enable `--notify` only when the user requested external notifications. Do not include secrets or credential-bearing URLs in notification text.
 - Never use `--last`, `--dangerously-bypass-approvals-and-sandbox`, or `--dangerously-bypass-hook-trust`.
 - Do not install Ralph Loop or Temporal for this workflow.
 - Do not claim the scheduler can wake a web/API chat unless the exact thread is locally resumable by Codex CLI.
