@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" role="img" aria-labelledby="title desc">
-  <title id="title">Cronloop terminal demonstration</title>
-  <desc id="desc">Illustrative terminal output for installing and checking a 30-minute benchmark monitoring job.</desc>
+  <title id="title">Cronloop foreground TTY demonstration</title>
+  <desc id="desc">Illustrative Codex output showing a monitoring round, a foreground 30-minute sleep, session polling, and the next round.</desc>
   <defs>
     <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#17253e"/>
@@ -17,50 +17,40 @@
     <circle cx="88" cy="74" r="8" fill="#ff6b6b"/>
     <circle cx="116" cy="74" r="8" fill="#f7c96b"/>
     <circle cx="144" cy="74" r="8" fill="#65d7c1"/>
-    <text x="600" y="80" text-anchor="middle" fill="#8093af" font-family="Inter,Segoe UI,sans-serif" font-size="14">cronloop — representative output</text>
+    <text x="600" y="80" text-anchor="middle" fill="#8093af" font-family="Inter,Segoe UI,sans-serif" font-size="14">cronloop — one live Codex task</text>
   </g>
   <g font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="17">
     <text x="84" y="143" fill="#65d7c1">$</text>
     <text x="108" y="143" fill="#edf3ff">$cronloop 30m monitor ./runs/exp-42 until 3 valid rounds complete</text>
 
-    <text x="84" y="186" fill="#8093af">expanded contract</text>
-    <text x="260" y="186" fill="#a9b9d0">scope · health checks · safe recovery · reporting · stop condition</text>
+    <text x="84" y="188" fill="#8093af">round 1</text>
+    <text x="200" y="188" fill="#edf3ff">248/360 valid | runner healthy | progress 4m ago</text>
+    <text x="84" y="226" fill="#8093af">ETA</text>
+    <text x="200" y="226" fill="#f7c96b">~4h10m</text>
+    <text x="420" y="226" fill="#8093af">action</text>
+    <text x="520" y="226" fill="#edf3ff">none</text>
 
-    <text x="84" y="230" fill="#67a6ff">✓</text>
-    <text x="114" y="230" fill="#edf3ff">installed</text>
-    <text x="238" y="230" fill="#a9b9d0">benchmark-watch</text>
-    <text x="472" y="230" fill="#8093af">schedule</text>
-    <text x="570" y="230" fill="#f7c96b">*/30 * * * *</text>
+    <text x="84" y="280" fill="#67a6ff">&gt;</text>
+    <text x="116" y="280" fill="#edf3ff">exec_command</text>
+    <text x="280" y="280" fill="#65d7c1">bash -lc 'sleep 1800'</text>
+    <text x="590" y="280" fill="#8093af">tty=true</text>
 
-    <text x="84" y="266" fill="#67a6ff">✓</text>
-    <text x="114" y="266" fill="#edf3ff">exact thread</text>
-    <text x="270" y="266" fill="#a9b9d0">12345678-…-123456789abc</text>
+    <rect x="82" y="310" width="1036" height="168" rx="10" fill="#091322" stroke="#243957"/>
+    <text x="108" y="349" fill="#8093af">00:00:30</text>
+    <text x="245" y="349" fill="#edf3ff">yielded session_id=4812</text>
+    <text x="650" y="349" fill="#65d7c1">sleep remains foreground</text>
+    <text x="108" y="391" fill="#8093af">00:05:30</text>
+    <text x="245" y="391" fill="#edf3ff">write_stdin 4812 (empty input)</text>
+    <text x="650" y="391" fill="#f7c96b">still running</text>
+    <text x="108" y="433" fill="#8093af">00:30:00</text>
+    <text x="245" y="433" fill="#edf3ff">write_stdin 4812 (empty input)</text>
+    <text x="650" y="433" fill="#65d7c1">exit 0 | timer complete</text>
 
-    <text x="84" y="302" fill="#67a6ff">✓</text>
-    <text x="114" y="302" fill="#edf3ff">cron daemon</text>
-    <text x="270" y="302" fill="#65d7c1">active:cron</text>
-    <text x="472" y="302" fill="#8093af">marker</text>
-    <text x="548" y="302" fill="#65d7c1">present</text>
+    <text x="84" y="526" fill="#8093af">round 2</text>
+    <text x="200" y="526" fill="#edf3ff">263/360 valid | runner healthy | 15 new cells</text>
+    <text x="84" y="566" fill="#67a6ff">&gt;</text>
+    <text x="116" y="566" fill="#edf3ff">start the next foreground sleep in the same task</text>
 
-    <text x="84" y="359" fill="#65d7c1">$</text>
-    <text x="108" y="359" fill="#edf3ff">cronloop status --job-id benchmark-watch</text>
-
-    <rect x="82" y="387" width="1036" height="178" rx="10" fill="#091322" stroke="#243957"/>
-    <text x="108" y="423" fill="#8093af">matrix</text>
-    <text x="238" y="423" fill="#edf3ff">248/360 valid</text>
-    <text x="484" y="423" fill="#8093af">runner</text>
-    <text x="604" y="423" fill="#65d7c1">healthy · one instance</text>
-    <text x="108" y="461" fill="#8093af">latest</text>
-    <text x="238" y="461" fill="#edf3ff">progress 4m ago</text>
-    <text x="484" y="461" fill="#8093af">action</text>
-    <text x="604" y="461" fill="#edf3ff">none</text>
-    <text x="108" y="499" fill="#8093af">ETA</text>
-    <text x="238" y="499" fill="#f7c96b">~4h10m</text>
-    <text x="484" y="499" fill="#8093af">next wake-up</text>
-    <text x="644" y="499" fill="#edf3ff">only if incomplete</text>
-    <text x="108" y="537" fill="#8093af">completion</text>
-    <text x="238" y="537" fill="#67a6ff">verify artifact → report → self-remove marker block</text>
-
-    <text x="84" y="599" fill="#7187a8">No model process remains alive between scheduled checks.</text>
+    <text x="84" y="602" fill="#7187a8">No cron. No daemon. No codex exec resume. No lost context.</text>
   </g>
 </svg>

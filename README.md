@@ -2,34 +2,31 @@
 
 [简体中文](README.zh-CN.md) · [Example](examples/benchmark-monitoring.md) · [Changelog](CHANGELOG.md) · [MIT License](LICENSE)
 
-Cronloop turns a short request such as “check this experiment every 30 minutes” into a guarded, recurring resume of the **exact current Codex CLI thread**. Each wake-up runs one evidence-driven round, records status and logs, and removes only its own cron entry after the completion condition is verified.
+Cronloop keeps one Codex task open and alternates between an agent monitoring round and a foreground TTY `bash sleep`. A request such as “check this experiment every 30 minutes” no longer installs cron or repeatedly launches `codex exec resume`.
 
 ![Cronloop architecture](docs/images/architecture.svg)
 
-## Why Cronloop
+## Why this design
 
-Long experiments often outlive one interactive Codex turn. A plain cron command can wake a process, but it does not preserve the agent's context or define when recovery is safe. Cronloop adds that missing contract:
+The original Cronloop used crontab to resume an exact Codex thread on every tick. That was durable, but each round required a fresh CLI/model invocation plus scheduler state, locking, logs, and cleanup. The new design is intentionally lighter:
 
-- exact-thread resume; never a best-effort `--last` lookup;
-- one bounded agent round per wake-up—no sleeping agent and no nested scheduler;
-- duplicate-run protection with file locking and a recent-activity window;
-- explicit scope, checks, recovery authority, reporting, and completion criteria;
-- timeout shorter than the interval and optional completion-file fast path;
-- optional Feishu delivery of each executed round's final assistant response;
-- marker-scoped, idempotent crontab updates that preserve unrelated entries;
-- local audit trail with permission-restricted prompt, config, status, and logs.
+- one continuous Codex task with its full current context;
+- a real foreground `sleep 1800` or `sleep 3600` inside a PTY;
+- no crontab entry, daemon, thread lookup, state directory, or cold resume;
+- one evidence-driven agent round when the timer finishes;
+- immediate user steering or cancellation in the same task;
+- optional external delivery of each completed round when explicitly requested.
 
-Cronloop is a local fallback. Prefer a product-native scheduled-task feature when one is available for your environment.
+The shell sleep may last much longer than 60 seconds. Codex's execution tool can yield a session ID while that same foreground process continues, then poll it in supported chunks. A limit on one tool call's wait time is not a limit on the PTY process lifetime.
 
 ## Requirements
 
-- Linux or another Unix-like host with `cron`, `crontab`, and `flock` support
-- Python 3.9+
-- An authenticated `codex` CLI
-- A locally resumable Codex thread with `CODEX_THREAD_ID` available
-- Optional notifications: an authenticated [`lark-cli`](https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide.md) with both user and bot identities ready
+- Codex CLI with PTY command execution and session polling (`exec_command` and `write_stdin`)
+- A Codex task that remains open for the full monitoring period
+- Bash and `sleep`
+- Optional Feishu notifications: an authenticated [`lark-cli`](https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide.md) or another configured Feishu connector
 
-The runner has no third-party Python dependencies.
+The core loop has no Python package, cron daemon, or third-party dependency.
 
 ## Install
 
@@ -43,71 +40,66 @@ Restart Codex CLI if the skill is not discovered in the current process. To inst
 
 ## Quick start
 
-Ask from the Codex thread that should own the recurring work:
+Ask in the task that should remain in the loop:
 
 ```text
-$cronloop 30m monitor ./runs/exp-42. Check process health, logs, result validity,
-and free disk space. Safely restart only after proving the runner is dead and no
-duplicate exists. Stop after all 3 rounds pass validation and results.xlsx is built.
+$cronloop 30m monitor ./runs/exp-42. Check process health, newest logs,
+result validity, and free disk space. Safely restart only after proving the
+runner is dead and no duplicate exists. Stop after all 3 rounds pass validation
+and results.xlsx is built.
 ```
 
-The skill expands the request into a bounded operating contract, shows it for review when needed, installs the cron entry, verifies daemon/marker status, and reports the job ID and removal command.
+Cronloop checks once immediately, reports the evidence, and—if incomplete—runs a foreground TTY timer equivalent to:
 
-![Example install and status output](docs/images/demo-terminal.svg)
-
-Inspect or stop a job directly:
-
-```bash
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py list
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py status --job-id benchmark-watch
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py remove --job-id benchmark-watch
+```text
+exec_command:
+  cmd: bash -lc 'sleep 1800'
+  tty: true
+  yield_time_ms: 30000
 ```
+
+When the execution call yields a session ID, Codex waits on that same process with empty `write_stdin` polls. When the timer exits, the next monitoring round begins in the same task.
+
+![Foreground TTY loop example](docs/images/demo-terminal.svg)
 
 ### Optional Feishu notifications
 
-Add `--notify feishu-cli` when installing a job to receive every executed round's final Codex response as a Feishu direct message:
+Ask for the final report from each completed monitoring round to be sent to Feishu:
 
-```bash
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py install \
-  --interval 30m \
-  --thread-id "$CODEX_THREAD_ID" \
-  --workdir "$PWD" \
-  --prompt-file /path/to/expanded-prompt.txt \
-  --job-id benchmark-watch \
-  --notify feishu-cli
+```text
+$cronloop 30m monitor ./runs/exp-42 and notify me in Feishu after each
+completed check. Stop when all three rounds are valid.
 ```
 
-The default target is the currently authenticated Feishu user. Use `--notify-target ou_xxx` for another user or `--notify-target oc_xxx` for a group chat. Cronloop verifies `lark-cli whoami` during installation, captures the round with Codex's `--output-last-message`, and sends it as the authenticated bot. Skipped rounds do not notify. Delivery is fail-open: a Feishu error is recorded in the job's `notify.log` and status file without turning a successful monitoring round into a failure. A completion-file fast path emits a minimal completion notice.
+Notifications are opt-in. Cronloop verifies the configured identity and target, sends only completed monitoring reports—not sleep-poll heartbeats—and redacts secret-like fields and credential-bearing URLs. Delivery is fail-open: an alert failure is reported in the current task without turning a healthy monitoring round into failure or stopping the foreground TTY loop.
 
-Supported intervals are `30m`, hour divisors of 24 (`1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`), and `1d`. Intervals below 30 minutes are intentionally rejected.
+Intervals use integer minutes, hours, or days, for example `30m`, `45m`, `1h`, `2h`, and `1d`. The default minimum is 30 minutes; shorter intervals may be used when the user explicitly requests a test.
 
 ## Effect example
 
 The included [benchmark-monitoring example](examples/benchmark-monitoring.md) models an 8-configuration × 15-query × 3-round experiment:
 
-1. Every 30 minutes, Cronloop resumes the same thread and inspects the runner, newest logs, result matrix, disk, and host load.
-2. If progress is healthy, it reports evidence and leaves the run untouched.
-3. If the runner is absent, it diagnoses the failure and may perform only the explicitly authorized, duplicate-safe recovery.
-4. When every matrix cell is valid, it builds the final table, verifies the artifact, reports completion, and removes its own marked cron block.
+1. The agent checks the runner, newest logs, result matrix, disk, and load immediately.
+2. If incomplete, it starts `sleep 1800` as the foreground process in a PTY.
+3. The execution tool may yield, but the same shell process owns the timer; Codex polls its session rather than starting a new timer.
+4. At expiry, the agent checks the experiment again with the full task context.
+5. The loop ends only after completion is verified, the user cancels it, or the live TTY session is irrecoverably lost.
 
-This pattern keeps the agent in the loop without keeping a model process alive between checks.
+## Safety and trade-offs
 
-## Safety model
-
-| Risk | Guardrail |
+| Concern | Behavior |
 |---|---|
-| Wrong conversation resumed | Exact UUID and exact local rollout are required |
-| Overlapping agent runs | Non-blocking file lock plus recent-thread activity check |
-| Runaway invocation | Per-run timeout is shorter than the schedule interval |
-| Prompt leaks credentials | Secret-like assignments are rejected; stored files use mode `0600` |
-| Proxy leaks credentials | Credential-bearing proxy URLs are not persisted |
-| Notification leaks credentials | Secret-like fields and webhook URLs are redacted before delivery |
-| Notification outage breaks monitoring | Delivery failures are isolated and recorded in `notify.log` |
-| Existing crontab is damaged | Only a named `BEGIN/END CRONLOOP` block is replaced or removed |
-| Recovery exceeds authority | Expanded prompt must state scope, allowed recovery, and forbidden actions |
-| Loop survives completion | Verified completion triggers its per-job removal command |
+| Accidental background scheduler | Never creates cron, daemon, tmux, nohup, or Scheduled Tasks |
+| Timer duplication | Polls one returned session ID and never restarts the interval after a normal yield |
+| Unsupported long tool wait | Uses the longest supported poll chunk while the foreground process continues |
+| Recovery exceeds authority | Diagnoses first and performs only recovery explicitly authorized by the user |
+| Notification leaks credentials | Redacts secret-like fields and credential-bearing URLs before delivery |
+| Notification outage breaks monitoring | Delivery failure is isolated from monitoring and reported in the current task |
+| User changes direction | Handles new input in the same task; cancellation interrupts the live TTY |
+| Client exits or host reboots | Loop stops; this lightweight mode is intentionally not durable |
+| TTY session is lost | Reports the loss instead of fabricating an approximate timer |
 
-Cronloop never uses approval-bypass flags and does not claim it can wake a web/API chat. It only resumes threads that the local Codex CLI can locate and resume.
+Cronloop is designed for interactive experiment supervision. Use a durable external scheduler only when surviving client exit or host reboot matters more than keeping one lightweight agent turn alive.
 
 ## Repository layout
 
@@ -115,20 +107,18 @@ Cronloop never uses approval-bypass flags and does not claim it can wake a web/A
 cronloop/                 installable Codex skill
   SKILL.md
   agents/openai.yaml
-  scripts/cronloop.py
-docs/images/              versioned diagrams used by both READMEs
-examples/                 expanded prompt and representative artifacts
-tests/                    isolated tests with fake crontab, Codex, and Lark binaries
+docs/images/              diagrams used by both READMEs
+examples/                 expanded monitoring example
+tests/                    static contract checks
 ```
 
 ## Development
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 cronloop/scripts/cronloop.py --help
 ```
 
-Tests use temporary files and never install a real crontab entry, resume a real thread, or send a real Feishu message.
+The tests do not start a real long sleep, modify machine scheduler state, or send a real notification.
 
 ## License
 

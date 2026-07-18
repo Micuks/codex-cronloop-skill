@@ -2,34 +2,31 @@
 
 [English](README.md) · [完整示例](examples/benchmark-monitoring.md) · [更新日志](CHANGELOG.md) · [MIT 许可证](LICENSE)
 
-Cronloop 把“每 30 分钟检查一次实验”这样的简短请求，转换成对**当前 Codex CLI 精确线程**的安全定时恢复。每次唤醒只执行一轮基于证据的检查，保存状态与日志；完成条件经过验证后，只删除属于自己的 cron 条目。
+Cronloop 在同一个 Codex 任务里交替执行“agent 检查一轮”和“前台 TTY `bash sleep`”。“每 30 分钟检查一次实验”不再安装 cron，也不再每轮重新启动 `codex exec resume`。
 
 ![Cronloop 架构](docs/images/architecture.svg)
 
-## 为什么需要 Cronloop
+## 为什么这样实现
 
-长时间实验往往会跨越多次交互。普通 cron 能唤醒进程，却不会保留 agent 上下文，也不会说明何时可以安全恢复。Cronloop 补上了这层执行契约：
+旧版 Cronloop 依靠 crontab 定时恢复精确 Codex thread。它能够跨进程持久化，但每轮都要重新启动 CLI/模型，还需要调度状态、锁、日志和清理。新版刻意选择更轻的 agent-in-the-loop 方式：
 
-- 使用精确 thread UUID 恢复，不使用不确定的 `--last`；
-- 每次唤醒只执行一轮，不让 agent 原地 sleep，也不创建嵌套调度器；
-- 使用文件锁和最近活动窗口避免重复运行；
-- 明确检查范围、恢复权限、禁止事项、汇报字段和结束条件；
-- 单轮超时短于调度间隔，并可用完成标记文件快速停止；
-- 可选把每个实际执行轮次的最终回复发送到飞书；
-- 通过独立标记块幂等更新 crontab，不影响其他任务；
-- prompt、配置、状态与日志均保存在本机，敏感文件权限为 `0600`。
+- 保持同一个 Codex 任务和完整上下文；
+- 在 PTY 中真实运行前台 `sleep 1800` 或 `sleep 3600`；
+- 不创建 crontab、daemon、thread 查询、状态目录或冷启动恢复；
+- 计时结束后由同一个 agent 执行一轮基于证据的检查；
+- 用户可以在同一任务里随时补充要求或取消；
+- 用户明确要求时，可把每轮完成后的报告发送到飞书等外部渠道。
 
-如果产品本身提供可靠的 Scheduled Tasks，应优先使用原生能力；Cronloop 是 Codex CLI 的本地兜底方案。
+Shell sleep 可以远长于 60 秒。Codex 执行工具会在保持同一前台进程运行的同时返回 session ID，之后以工具支持的时间片轮询。单次工具调用的等待上限，不是 TTY 进程的寿命上限。
 
 ## 环境要求
 
-- Linux 或具有 `cron`、`crontab`、`flock` 的类 Unix 主机
-- Python 3.9+
-- 已登录的 `codex` CLI
-- 当前线程可由本机 Codex CLI 恢复，并能读取 `CODEX_THREAD_ID`
-- 可选通知：已登录的 [`lark-cli`](https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide.md)，且用户与机器人身份均处于可用状态
+- 支持 PTY 命令和 session 轮询（`exec_command`、`write_stdin`）的 Codex CLI
+- 监控期间保持当前 Codex 任务与客户端运行
+- Bash 和 `sleep`
+- 可选飞书通知：已登录的 [`lark-cli`](https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide.md) 或其他已配置飞书连接器
 
-运行器不依赖第三方 Python 包。
+核心循环不再依赖 Python、cron daemon 或第三方软件包。
 
 ## 安装
 
@@ -39,96 +36,88 @@ mkdir -p ~/.codex/skills
 ln -s "$PWD/codex-cronloop-skill/cronloop" ~/.codex/skills/cronloop
 ```
 
-如果当前 Codex 进程未发现新 skill，请重启 Codex CLI。也可以不使用软链接，直接把 `cronloop/` 复制到 `~/.codex/skills/cronloop/`。
+如果当前 Codex 进程没有发现 skill，请重启 Codex CLI。也可以直接把 `cronloop/` 复制到 `~/.codex/skills/cronloop/`。
 
 ## 快速使用
 
-在需要持续接手工作的 Codex 线程中输入：
+在需要持续监控的任务里输入：
 
 ```text
-$cronloop 30m 监控 ./runs/exp-42。检查进程、日志、结果有效性和磁盘空间；
+$cronloop 30m 监控 ./runs/exp-42。检查进程、最新日志、结果有效性和磁盘空间；
 只有确认 runner 已退出且不存在重复实例后，才允许安全重启。
 全部三轮通过校验并生成 results.xlsx 后停止。
 ```
 
-Skill 会把简短指令展开为单轮执行契约，必要时先展示给用户确认，然后安装 cron 条目、检查 daemon/marker 状态，并返回 job ID、日志目录和删除命令。
+Cronloop 默认立即检查一轮；如果尚未完成，就启动等价于下面调用的前台 TTY 计时器：
 
-![安装和状态效果示例](docs/images/demo-terminal.svg)
-
-也可以直接检查或停止任务：
-
-```bash
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py list
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py status --job-id benchmark-watch
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py remove --job-id benchmark-watch
+```text
+exec_command:
+  cmd: bash -lc 'sleep 1800'
+  tty: true
+  yield_time_ms: 30000
 ```
+
+执行工具返回 session ID 后，Codex 使用空 `write_stdin` 持续等待同一个进程。计时结束后，仍在同一任务里执行下一轮检查。
+
+![前台 TTY 循环示例](docs/images/demo-terminal.svg)
 
 ### 可选飞书通知
 
-安装任务时添加 `--notify feishu-cli`，即可把每个实际执行轮次的 Codex 最终回复作为飞书私信发送：
+在请求中明确要求把每轮完成后的报告发送到飞书：
 
-```bash
-python3 ~/.codex/skills/cronloop/scripts/cronloop.py install \
-  --interval 30m \
-  --thread-id "$CODEX_THREAD_ID" \
-  --workdir "$PWD" \
-  --prompt-file /path/to/expanded-prompt.txt \
-  --job-id benchmark-watch \
-  --notify feishu-cli
+```text
+$cronloop 30m 监控 ./runs/exp-42，每轮检查完成后通知我的飞书；
+三轮结果全部有效后停止。
 ```
 
-默认目标是当前登录的飞书用户。可用 `--notify-target ou_xxx` 指定其他用户，或用 `--notify-target oc_xxx` 指定群聊。Cronloop 会在安装时检查 `lark-cli whoami`，通过 Codex 的 `--output-last-message` 捕获本轮最终回复，再以已登录机器人身份发送。因线程活跃或锁冲突而跳过的轮次不会通知。通知采用 fail-open：飞书发送失败只会写入该任务的 `notify.log` 和状态文件，不会把成功的监控轮次判成失败；完成标记文件的快速路径会发送一条精简完成通知。
+通知默认关闭。Cronloop 会验证已配置的身份和目标，只发送真实监控轮次的报告，不发送 sleep 轮询心跳，并在发送前脱敏疑似密钥和带凭据 URL。通知采用 fail-open：发送失败会在当前任务中报告，但不会把健康的监控轮次判成失败，也不会停止前台 TTY 循环。
 
-支持 `30m`、24 的小时因子（`1h`、`2h`、`3h`、`4h`、`6h`、`8h`、`12h`）以及 `1d`。为避免无意义的频繁唤醒，小于 30 分钟的间隔会被拒绝。
+间隔使用整数分钟、小时或天，例如 `30m`、`45m`、`1h`、`2h`、`1d`。默认最短 30 分钟；用户明确要求测试时可以使用更短间隔。
 
 ## 效果示例
 
 仓库中的[实验监控示例](examples/benchmark-monitoring.md)描述了一个“8 个配置 × 15 个 query × 3 轮”的场景：
 
-1. 每 30 分钟恢复同一个线程，检查 runner、最新日志、结果矩阵、磁盘和主机负载。
-2. 运行健康时只汇报证据，不干预实验。
-3. runner 消失时先诊断；只有恢复操作被明确授权且能够避免重复运行，才执行恢复。
-4. 所有矩阵单元有效后，生成最终表格并验证产物，然后汇报完成并删除自己的 cron 标记块。
+1. agent 立即检查 runner、最新日志、结果矩阵、磁盘和负载。
+2. 尚未完成时，在 PTY 中以前台进程启动 `sleep 1800`。
+3. 执行工具即使中途 yield，也始终轮询同一个 shell session，不重新开始计时。
+4. 到期后，agent 带着完整任务上下文再次检查实验。
+5. 只有验证完成、用户取消或 TTY session 无法恢复时，循环才结束。
 
-这样可以让 agent 持续参与诊断和调优，同时无需在两次检查之间维持模型进程。
+## 安全性与取舍
 
-## 安全设计
-
-| 风险 | 防护措施 |
+| 关注点 | 行为 |
 |---|---|
-| 恢复了错误会话 | 强制要求精确 UUID 和对应本地 rollout |
-| 多轮重叠运行 | 非阻塞文件锁 + 线程最近活动检查 |
-| 单轮失控 | 每轮超时必须短于调度间隔 |
-| Prompt 泄漏凭据 | 拒绝疑似密钥赋值，落盘文件权限为 `0600` |
-| 代理 URL 泄漏凭据 | 不保存带用户名或密码的代理 URL |
-| 通知正文泄漏凭据 | 发送前脱敏疑似密钥字段和 webhook URL |
-| 飞书故障打断监控 | 通知失败与监控结果隔离，并记录到 `notify.log` |
-| 破坏已有 crontab | 只替换或删除指定的 `BEGIN/END CRONLOOP` 块 |
-| 恢复动作越权 | 展开后的 prompt 必须写明范围、允许恢复和禁止动作 |
-| 完成后仍继续唤醒 | 验证完成后执行该 job 专属的删除命令 |
+| 意外创建后台调度 | 不创建 cron、daemon、tmux、nohup 或 Scheduled Task |
+| 重复计时 | 始终轮询一个 session ID，正常 yield 后不重新开始 interval |
+| 单次工具等待有上限 | 使用工具允许的最长轮询时间片，前台进程继续运行 |
+| 恢复动作越权 | 先诊断，只执行用户明确授权的恢复 |
+| 通知正文泄漏凭据 | 发送前脱敏疑似密钥和带凭据 URL |
+| 飞书故障打断监控 | 通知失败与监控结果隔离，并在当前任务报告 |
+| 用户改变要求 | 在同一任务处理新输入；取消时中断 live TTY |
+| 客户端退出或主机重启 | 循环停止；轻量模式有意不提供持久调度 |
+| TTY session 丢失 | 明确报告，不伪造近似计时器 |
 
-Cronloop 不使用跳过审批/沙箱的参数，也不能唤醒普通网页或 API 对话；它只处理本机 Codex CLI 能定位并恢复的线程。
+Cronloop 面向交互式实验监督。如果必须跨客户端退出或主机重启继续运行，应使用外部持久化调度器，而不是这个轻量模式。
 
 ## 仓库结构
 
 ```text
-cronloop/                 可直接安装的 Codex skill
+cronloop/                 可安装的 Codex skill
   SKILL.md
   agents/openai.yaml
-  scripts/cronloop.py
-docs/images/              中英文 README 共用的版本化附图
-examples/                 展开的 prompt 与效果产物示例
-tests/                    使用伪 crontab/伪 Codex/伪 Lark CLI 的隔离测试
+docs/images/              中英文 README 共用附图
+examples/                 展开的监控示例
+tests/                    静态契约测试
 ```
 
 ## 开发与测试
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 cronloop/scripts/cronloop.py --help
 ```
 
-测试只使用临时目录，不会写入真实 crontab、恢复真实线程或发送真实飞书消息。
+测试不会启动真实的长时间 sleep、修改本机调度器状态或发送真实通知。
 
 ## 许可证
 

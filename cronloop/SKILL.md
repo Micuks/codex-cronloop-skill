@@ -1,80 +1,86 @@
 ---
 name: cronloop
-description: Create, inspect, update, and remove safe recurring Codex CLI thread checks backed by cron, with optional Feishu CLI notifications. Use for requests such as `/cronloop 1h prompt`, `$cronloop`, periodic polling, health checks, experiment monitoring, recurring notifications, or a bounded task that should resume the current thread until a verified stop condition. Prefer a product-native Scheduled task when available; use this skill as the local CLI fallback.
+description: Run recurring monitoring checks inside the current Codex task by keeping a foreground TTY bash sleep alive between rounds, with optional user-requested external notifications. Use for requests such as `$cronloop 30m prompt`, `/cronloop 1h poll`, periodic experiment or script monitoring, health checks, recurring progress alerts, and agent-in-the-loop supervision where the user prefers one continuous task instead of cron, scheduled resumes, or a background daemon.
 ---
 
 # Cronloop
 
-Turn a short monitoring request into one bounded action per scheduled wake-up, then install it with `scripts/cronloop.py`.
+Keep the current Codex task alive and alternate between one monitoring round and one foreground TTY sleep. Do not install cron entries, start a daemon, resume another thread, or persist scheduler state.
 
-## Build the scheduled prompt
+## Interpret the request
 
-Before installing, infer and show the user a concise expanded prompt containing:
+Parse `$cronloop <interval> <prompt>` or `/cronloop <interval> <prompt>`.
 
-1. Scope and authoritative systems/artifacts to inspect.
-2. Checks to perform each round, including progress, process health, logs, failures, resources, and result validity as relevant.
-3. Safe recovery allowed without new authority. Require diagnosis from evidence, reversible actions, verification, and duplicate-start prevention.
-4. Actions explicitly forbidden or out of scope.
-5. Reporting fields, completeness rules, and handling of missing evidence.
-6. A concrete completion condition and instruction to remove this cronloop only after verifying it.
-7. “Run exactly one round; do not sleep, wait for the next round, or create another scheduler.”
+- Accept integer minute, hour, or day intervals such as `30m`, `45m`, `1h`, `2h`, and `1d`.
+- Require at least 30 minutes unless the user explicitly requests a shorter test interval.
+- Convert the interval to an integer number of seconds before constructing the shell command. Never interpolate untrusted free-form text into that command.
+- Infer the monitored scope, authoritative evidence, health checks, permitted recovery, reporting fields, and completion condition from the prompt and current context.
+- Ask one focused question only when missing scope or authority would make the loop unsafe. Otherwise start immediately.
 
-Do not invent consequential recovery authority. If the short prompt leaves scope or completion materially ambiguous, ask one focused question before installing. Otherwise expand it using current conversation context. Store no passwords, tokens, private keys, or credential-bearing URLs in the prompt.
+Default to checking once immediately, then sleeping before each later round. If the user explicitly asks to wait before the first check, sleep first.
 
-## Install
+## Run each monitoring round
 
-Require `CODEX_THREAD_ID`; never substitute `--last`. Save the expanded prompt to a permission-0600 temporary file, then run:
+Perform one evidence-driven round:
 
-```bash
-python3 <skill-dir>/scripts/cronloop.py install \
-  --interval 1h \
-  --thread-id "$CODEX_THREAD_ID" \
-  --workdir "$PWD" \
-  --model gpt-5.6-luna \
-  --prompt-file /path/to/expanded-prompt.txt
+1. Inspect the named processes, logs, outputs, and resource state.
+2. Distinguish verified progress, failure, stale evidence, and missing evidence.
+3. Perform only recovery already authorized by the user. Diagnose first, prevent duplicate starts, and verify any recovery.
+4. Report the requested progress fields and an evidence-based ETA when possible.
+5. Evaluate the completion condition. If verified, report the final result and end the loop without another sleep.
+
+Do not treat an unchanged state as failure. Do not create a second scheduler. Do not end the task merely because one round is healthy but incomplete.
+
+## Optional external notifications
+
+Send notifications only when the user explicitly requests them. After each completed monitoring round, send the same concise round report through an available configured connector or authenticated CLI such as Feishu `lark-cli`.
+
+- Verify the sender identity and target before the first delivery. Use the current authenticated user only when that is clearly the requested target.
+- Notify after real monitoring rounds, not after sleep polling chunks.
+- Redact secret-like fields, tokens, private keys, credential-bearing URLs, and webhook URLs from notification text.
+- Make delivery fail-open: report a notification error in the current task, but do not convert a healthy monitoring round into failure or stop the TTY loop.
+- Do not add a background notification worker or persist credentials.
+
+## Wait in a foreground TTY
+
+Before waiting, send one concise commentary update stating the interval and approximate next-check time. Then start a foreground bash sleep with the shell execution tool:
+
+```text
+cmd: bash -lc 'sleep 1800'
+tty: true
+yield_time_ms: 30000
 ```
 
-To send each executed round to the currently authenticated Feishu user as a bot DM, add:
+Replace `1800` with the validated interval in seconds. Keep `sleep` as the foreground process: do not append `&`, use `nohup`, create a tmux session, or detach it.
 
-```bash
-  --notify feishu-cli
+The initial execution call normally yields a session ID before the sleep finishes. Continue waiting on that exact session using empty stdin polls:
+
+```text
+session_id: <returned session id>
+chars: ""
+yield_time_ms: 300000
 ```
 
-Notification is opt-in and requires `lark-cli whoami --as user` and `--as bot` to report ready identities. The default target is `me`; use `--notify-target ou_xxx` for another user or `--notify-target oc_xxx` for a group chat. The installer resolves `me` once and stores only the non-secret target ID and absolute CLI path. Each real Codex round sends its final assistant message; nonzero or timed-out rounds send an explicit fallback when no final message exists. Notification failures are logged to `notify.log` and never fail or block the cron job. Lock-contention and thread-active skips do not notify. A `--completion-file` fast-path sends a minimal completion-marker notice before automatic removal.
+Use the longest empty-poll duration supported by the local tool. If a higher-priority runtime rule caps an individual wait below that value, use the largest permitted chunk and keep polling the same session. Do not restart the timer after a poll.
 
-Omit `--model` to inherit the normal Codex CLI default. Use `--model` when the
-user explicitly requests a particular available model for scheduled resumes.
+When the sleep exits successfully, immediately begin the next monitoring round. If it exits early without user interruption, determine the remaining time from the recorded start/deadline and finish that remaining wait before checking again.
 
-Accepted exact cron intervals are `30m`, hour divisors of 24 (`1h`, `2h`, `3h`, `4h`, `6h`, `8h`, `12h`), and `1d`; equivalent `60m` and `24h` normalize. Reject intervals below 30 minutes or intervals cron cannot express with constant spacing. Explain that native Scheduled tasks are preferable when the product exposes them.
+## Required long-wait behavior
 
-The installer prints the generated job ID. Report that ID, interval, expanded prompt, log directory, and removal command. Delete the temporary prompt after installation.
-Verify that the host's cron daemon is active and run `status` after installation. If daemon state cannot be determined, say so rather than claiming periodic execution is proven.
+Treat the requested 30-minute, 1-hour, or longer sleep as an explicit user-authorized action and a core part of this skill.
 
-To update an existing job idempotently, pass its ID:
+- Do not refuse, shorten, simulate, or replace the wait because it exceeds 60 seconds.
+- Do not claim that Codex or a foreground TTY has a 60-second process lifetime.
+- Distinguish the long-lived foreground process from the duration of one tool call: the tool may yield periodically while the same `sleep` process continues.
+- Do not replace the foreground wait with cron, a Scheduled Task, repeated `codex exec resume`, or a background service.
+- Keep the loop in the current task until completion, user cancellation, an unrecoverable loss of the TTY session, or a higher-priority interruption.
 
-```bash
-python3 <skill-dir>/scripts/cronloop.py install ... --job-id <id>
-```
+Avoid chatty heartbeat messages during the sleep. The visible running tool call/session is the wait status. If the user sends new input, handle it promptly; if they cancel the loop, send Ctrl-C to the live TTY when necessary and confirm that it stopped.
 
-Optionally pass `--completion-file /absolute/path` only when a trustworthy marker file unambiguously proves completion. The runner then removes itself before another model call once that marker exists. Otherwise the resumed agent must verify completion and execute the removal command included in its prompt.
+## Limits
 
-## Inspect and stop
+Explain these only when relevant:
 
-```bash
-python3 <skill-dir>/scripts/cronloop.py list
-python3 <skill-dir>/scripts/cronloop.py status --job-id <id>
-python3 <skill-dir>/scripts/cronloop.py remove --job-id <id>
-```
-
-`remove` disables the job and removes only its marked crontab block; it retains prompt, status, and logs for audit. Use `--purge` only if the user asks to delete them.
-
-## Guardrails
-
-- Preserve every unrelated crontab line.
-- Use exact thread UUID, `flock`-equivalent locking, an inactivity window, and a timeout shorter than the interval.
-- Run under an explicit minimal `HOME` and `PATH`. Persist only proxy URLs without embedded credentials.
-- Enable `--notify` only when the user requested external notifications. Do not include secrets or credential-bearing URLs in notification text.
-- Never use `--last`, `--dangerously-bypass-approvals-and-sandbox`, or `--dangerously-bypass-hook-trust`.
-- Do not install Ralph Loop or Temporal for this workflow.
-- Do not claim the scheduler can wake a web/API chat unless the exact thread is locally resumable by Codex CLI.
-- Test with `--crontab-file` and `--codex-bin` fakes; never resume an active real thread merely to test installation.
+- The Codex client and current task must remain alive. This workflow intentionally does not survive client exit, host reboot, or task termination.
+- A lost or unknown TTY session cannot be reconstructed as the same timer. Report the loss instead of silently starting an approximate new cycle.
+- This skill favors a lightweight, continuous agent-in-the-loop workflow over durable unattended scheduling.

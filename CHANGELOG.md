@@ -8,16 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Optional Feishu delivery with `--notify feishu-cli`.
-- User and group routing with `--notify-target` (`me`, `ou_xxx`, or `oc_xxx`).
-- Final-response capture through Codex `--output-last-message`, per-job notification status, and `notify.log` diagnostics.
-- Minimal Feishu completion notices for completion-file fast paths.
-- Explicit model pinning with `--model` for deterministic thread resumes.
-- Isolated regression tests using fake Codex and Lark CLI binaries.
+- Foreground TTY `bash sleep` cycles that keep monitoring in the current Codex task.
+- Explicit long-wait contract distinguishing a tool-call yield from the lifetime of the foreground process.
+- Arbitrary integer minute, hour, and day intervals instead of five-field cron-compatible intervals only.
+- Optional user-requested external delivery of completed round reports, including Feishu.
+- Static contract tests and an isolated end-to-end foreground-session forward test.
 
 ### Changed
 
-- Job configuration schema advanced to version 3 to persist non-secret model and notification settings.
+- Reimplemented Cronloop as a lightweight, continuous agent-in-the-loop skill with no scheduler state or cold thread resumes.
+- External notifications now run in the current task after real monitoring rounds and remain fail-open.
+
+### Removed
+
+- Crontab installation, daemon checks, persisted job state, locking, and repeated `codex exec resume` invocations.
+- The Python cron runner and its scheduler-specific tests.
 
 ### Security
 

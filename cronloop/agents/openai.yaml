@@ -1,4 +1,4 @@
 interface:
   display_name: "Cron Loop"
-  short_description: "Schedule recurring checks with optional Feishu alerts"
-  default_prompt: "Use $cronloop to run a scoped health check every hour, optionally notify me in Feishu, and stop after verified completion."
+  short_description: "TTY sleep monitoring with optional alerts"
+  default_prompt: "Use $cronloop to monitor this task every 30 minutes using foreground TTY sleep, optionally notifying me after each completed round."
