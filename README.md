@@ -1,14 +1,14 @@
-# Cronloop for Codex CLI
+# Loop for Codex CLI
 
 [简体中文](README.zh-CN.md) · [Example](examples/benchmark-monitoring.md) · [Changelog](CHANGELOG.md) · [MIT License](LICENSE)
 
-Cronloop keeps one Codex task open and alternates between an agent monitoring round and a foreground TTY `bash sleep`. A request such as “check this experiment every 30 minutes” no longer installs cron or repeatedly launches `codex exec resume`.
+Loop keeps one Codex task open and alternates between an agent monitoring round and a foreground TTY `bash sleep`. A request such as “check this experiment every 30 minutes” no longer installs cron or repeatedly launches `codex exec resume`.
 
-![Cronloop architecture](docs/images/architecture.svg)
+![Loop architecture](docs/images/architecture.svg)
 
 ## Why this design
 
-The original Cronloop used crontab to resume an exact Codex thread on every tick. That was durable, but each round required a fresh CLI/model invocation plus scheduler state, locking, logs, and cleanup. The new design is intentionally lighter:
+The original Loop used crontab to resume an exact Codex thread on every tick. That was durable, but each round required a fresh CLI/model invocation plus scheduler state, locking, logs, and cleanup. The new design is intentionally lighter:
 
 - one continuous Codex task with its full current context;
 - a real foreground `sleep 1800` or `sleep 3600` inside a PTY;
@@ -31,25 +31,25 @@ The core loop has no Python package, cron daemon, or third-party dependency.
 ## Install
 
 ```bash
-git clone https://github.com/Micuks/codex-cronloop-skill.git
+git clone https://github.com/Micuks/codex-loop-skill.git
 mkdir -p ~/.codex/skills
-ln -s "$PWD/codex-cronloop-skill/cronloop" ~/.codex/skills/cronloop
+ln -s "$PWD/codex-loop-skill/loop" ~/.codex/skills/loop
 ```
 
-Restart Codex CLI if the skill is not discovered in the current process. To install without a symlink, copy the `cronloop/` directory to `~/.codex/skills/cronloop/`.
+Restart Codex CLI if the skill is not discovered in the current process. To install without a symlink, copy the `loop/` directory to `~/.codex/skills/loop/`.
 
 ## Quick start
 
 Ask in the task that should remain in the loop:
 
 ```text
-$cronloop 30m monitor ./runs/exp-42. Check process health, newest logs,
+$loop 30m monitor ./runs/exp-42. Check process health, newest logs,
 result validity, and free disk space. Safely restart only after proving the
 runner is dead and no duplicate exists. Stop after all 3 rounds pass validation
 and results.xlsx is built.
 ```
 
-Cronloop checks once immediately, reports the evidence, and—if incomplete—runs a foreground TTY timer equivalent to:
+Loop checks once immediately, reports the evidence, and—if incomplete—runs a foreground TTY timer equivalent to:
 
 ```text
 exec_command:
@@ -67,11 +67,11 @@ When the execution call yields a session ID, Codex waits on that same process wi
 Ask for the final report from each completed monitoring round to be sent to Feishu:
 
 ```text
-$cronloop 30m monitor ./runs/exp-42 and notify me in Feishu after each
+$loop 30m monitor ./runs/exp-42 and notify me in Feishu after each
 completed check. Stop when all three rounds are valid.
 ```
 
-Notifications are opt-in. Cronloop verifies the configured identity and target, sends only completed monitoring reports—not sleep-poll heartbeats—and redacts secret-like fields and credential-bearing URLs. Delivery is fail-open: an alert failure is reported in the current task without turning a healthy monitoring round into failure or stopping the foreground TTY loop.
+Notifications are opt-in. Loop verifies the configured identity and target, sends only completed monitoring reports—not sleep-poll heartbeats—and redacts secret-like fields and credential-bearing URLs. Delivery is fail-open: an alert failure is reported in the current task without turning a healthy monitoring round into failure or stopping the foreground TTY loop.
 
 Intervals use integer minutes, hours, or days, for example `30m`, `45m`, `1h`, `2h`, and `1d`. The default minimum is 30 minutes; shorter intervals may be used when the user explicitly requests a test.
 
@@ -99,12 +99,12 @@ The included [benchmark-monitoring example](examples/benchmark-monitoring.md) mo
 | Client exits or host reboots | Loop stops; this lightweight mode is intentionally not durable |
 | TTY session is lost | Reports the loss instead of fabricating an approximate timer |
 
-Cronloop is designed for interactive experiment supervision. Use a durable external scheduler only when surviving client exit or host reboot matters more than keeping one lightweight agent turn alive.
+Loop is designed for interactive experiment supervision. Use a durable external scheduler only when surviving client exit or host reboot matters more than keeping one lightweight agent turn alive.
 
 ## Repository layout
 
 ```text
-cronloop/                 installable Codex skill
+loop/                 installable Codex skill
   SKILL.md
   agents/openai.yaml
 docs/images/              diagrams used by both READMEs

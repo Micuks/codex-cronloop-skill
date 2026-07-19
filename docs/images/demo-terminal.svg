@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" role="img" aria-labelledby="title desc">
-  <title id="title">Cronloop foreground TTY demonstration</title>
+  <title id="title">Loop foreground TTY demonstration</title>
   <desc id="desc">Illustrative Codex output showing a monitoring round, a foreground 30-minute sleep, session polling, and the next round.</desc>
   <defs>
     <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
@@ -17,11 +17,11 @@
     <circle cx="88" cy="74" r="8" fill="#ff6b6b"/>
     <circle cx="116" cy="74" r="8" fill="#f7c96b"/>
     <circle cx="144" cy="74" r="8" fill="#65d7c1"/>
-    <text x="600" y="80" text-anchor="middle" fill="#8093af" font-family="Inter,Segoe UI,sans-serif" font-size="14">cronloop — one live Codex task</text>
+    <text x="600" y="80" text-anchor="middle" fill="#8093af" font-family="Inter,Segoe UI,sans-serif" font-size="14">loop — one live Codex task</text>
   </g>
   <g font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="17">
     <text x="84" y="143" fill="#65d7c1">$</text>
-    <text x="108" y="143" fill="#edf3ff">$cronloop 30m monitor ./runs/exp-42 until 3 valid rounds complete</text>
+    <text x="108" y="143" fill="#edf3ff">$loop 30m monitor ./runs/exp-42 until 3 valid rounds complete</text>
 
     <text x="84" y="188" fill="#8093af">round 1</text>
     <text x="200" y="188" fill="#edf3ff">248/360 valid | runner healthy | progress 4m ago</text>

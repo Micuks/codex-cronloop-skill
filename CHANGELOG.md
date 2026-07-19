@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Reimplemented Cronloop as a lightweight, continuous agent-in-the-loop skill with no scheduler state or cold thread resumes.
+- Reimplemented Loop as a lightweight, continuous agent-in-the-loop skill with no scheduler state or cold thread resumes.
 - External notifications now run in the current task after real monitoring rounds and remain fail-open.
 
 ### Removed
@@ -33,5 +33,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Initial exact-thread Cronloop skill release.
+- Initial exact-thread Loop skill release.
 - Guarded single-round execution, overlap protection, timeout enforcement, completion-file cleanup, and marker-scoped crontab management.

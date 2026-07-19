@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop"
+  short_description: "TTY sleep monitoring with optional alerts"
+  default_prompt: "Use $loop to monitor this task every 30 minutes using foreground TTY sleep, optionally notifying me after each completed round."

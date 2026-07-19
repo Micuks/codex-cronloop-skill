@@ -5,7 +5,7 @@ This is a representative pattern. Paths and metrics are illustrative.
 ## Short request
 
 ```text
-$cronloop 30m monitor ./runs/exp-42 until all 8 configurations have 3 valid
+$loop 30m monitor ./runs/exp-42 until all 8 configurations have 3 valid
 rounds for q01-q15 and results.xlsx is generated. Check runner/process health,
 newest logs, matrix completeness, disk, and load. If stalled, diagnose first;
 restart only when the runner is absent and no duplicate exists. Do not change

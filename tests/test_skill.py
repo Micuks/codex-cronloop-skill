@@ -4,20 +4,20 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "cronloop" / "SKILL.md"
+SKILL = ROOT / "loop" / "SKILL.md"
 
 
-class CronloopSkillTest(unittest.TestCase):
+class LoopSkillTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.text = SKILL.read_text()
 
-    def test_frontmatter_is_minimal_and_named_cronloop(self) -> None:
+    def test_frontmatter_is_minimal_and_named_loop(self) -> None:
         match = re.match(r"^---\n(.*?)\n---\n", self.text, re.DOTALL)
         self.assertIsNotNone(match)
         keys = [line.split(":", 1)[0] for line in match.group(1).splitlines()]
         self.assertEqual(keys, ["name", "description"])
-        self.assertIn("name: cronloop", match.group(1))
+        self.assertIn("name: loop", match.group(1))
 
     def test_foreground_tty_protocol_is_explicit(self) -> None:
         for required in (
@@ -40,7 +40,7 @@ class CronloopSkillTest(unittest.TestCase):
         self.assertIn("not after sleep polling chunks", self.text)
 
     def test_legacy_cron_runner_is_removed(self) -> None:
-        self.assertFalse((ROOT / "cronloop" / "scripts" / "cronloop.py").exists())
+        self.assertFalse((ROOT / "loop" / "scripts" / "cronloop.py").exists())
 
 
 if __name__ == "__main__":

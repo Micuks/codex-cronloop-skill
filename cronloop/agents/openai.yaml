@@ -1,4 +1,0 @@
-interface:
-  display_name: "Cron Loop"
-  short_description: "TTY sleep monitoring with optional alerts"
-  default_prompt: "Use $cronloop to monitor this task every 30 minutes using foreground TTY sleep, optionally notifying me after each completed round."

@@ -1,15 +1,15 @@
 ---
-name: cronloop
-description: Run recurring monitoring checks inside the current Codex task by keeping a foreground TTY bash sleep alive between rounds, with optional user-requested external notifications. Use for requests such as `$cronloop 30m prompt`, `/cronloop 1h poll`, periodic experiment or script monitoring, health checks, recurring progress alerts, and agent-in-the-loop supervision where the user prefers one continuous task instead of cron, scheduled resumes, or a background daemon.
+name: loop
+description: Run recurring monitoring checks inside the current Codex task by keeping a foreground TTY bash sleep alive between rounds, with optional user-requested external notifications. Use for requests such as `$loop 30m prompt`, `/loop 1h poll`, periodic experiment or script monitoring, health checks, recurring progress alerts, and agent-in-the-loop supervision where the user prefers one continuous task instead of cron, scheduled resumes, or a background daemon.
 ---
 
-# Cronloop
+# Loop
 
 Keep the current Codex task alive and alternate between one monitoring round and one foreground TTY sleep. Do not install cron entries, start a daemon, resume another thread, or persist scheduler state.
 
 ## Interpret the request
 
-Parse `$cronloop <interval> <prompt>` or `/cronloop <interval> <prompt>`.
+Parse `$loop <interval> <prompt>` or `/loop <interval> <prompt>`.
 
 - Accept integer minute, hour, or day intervals such as `30m`, `45m`, `1h`, `2h`, and `1d`.
 - Require at least 30 minutes unless the user explicitly requests a shorter test interval.

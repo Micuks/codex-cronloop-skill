@@ -18,4 +18,4 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Confirm installable skill files
-        run: test -f cronloop/SKILL.md && test -f cronloop/agents/openai.yaml
+        run: test -f loop/SKILL.md && test -f loop/agents/openai.yaml
